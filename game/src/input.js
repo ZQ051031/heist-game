@@ -1,53 +1,80 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
+// Keyboard and mouse. Held keys steer and sneak; key presses and clicks are queued and taken once
+// per frame by the loop, so a quick tap between two frames is never lost or counted twice.
+(function (HW) {
+  'use strict';
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
+  const GAME_KEYS = new Set([
+    'KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ShiftLeft', 'ShiftRight',
+    'KeyE', 'Space', 'Enter', 'Escape', 'KeyP', 'KeyR', 'KeyM', 'KeyN', 'KeyQ', 'Digit1', 'Digit2', 'Digit3',
+  ]);
 
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+  HW.createInput = function createInput(canvas, toLogical) {
+    const held = new Set();
+    let presses = [];
+    let clicks = [];
+    const mouse = { x: HW.VIEW.width / 2, y: HW.VIEW.height / 2, down: false, seen: false };
+    const listeners = [];
 
-export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+    window.addEventListener('keydown', (event) => {
+      if (!GAME_KEYS.has(event.code)) return;
+      event.preventDefault();
+      held.add(event.code);
+      if (!event.repeat) presses.push(event.code);
+      listeners.forEach((fn) => fn());
+    });
+    window.addEventListener('keyup', (event) => held.delete(event.code));
+    window.addEventListener('blur', () => {
+      held.clear();
+      mouse.down = false;
+    });
+    canvas.addEventListener('pointermove', (event) => {
+      const p = toLogical(event.clientX, event.clientY);
+      mouse.x = p.x;
+      mouse.y = p.y;
+      mouse.seen = true;
+    });
+    canvas.addEventListener('pointerdown', (event) => {
+      const p = toLogical(event.clientX, event.clientY);
+      mouse.x = p.x;
+      mouse.y = p.y;
+      mouse.seen = true;
+      if (event.button === 0) {
+        mouse.down = true;
+        clicks.push({ x: p.x, y: p.y });
+      }
+      listeners.forEach((fn) => fn());
+    });
+    window.addEventListener('pointerup', () => {
+      mouse.down = false;
+    });
+    canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
-  window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
-  });
-  window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
-  });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
-  window.addEventListener('blur', () => {
-    left = false;
-    right = false;
-  });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
-  });
+    const any = (...codes) => codes.some((code) => held.has(code));
 
-  return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
-    },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
+    return {
+      mouse,
+      /** Call fn on every key press or click (the first one unlocks audio). */
+      onGesture(fn) {
+        listeners.push(fn);
+      },
+      axis() {
+        return {
+          mx: (any('KeyD', 'ArrowRight') ? 1 : 0) - (any('KeyA', 'ArrowLeft') ? 1 : 0),
+          my: (any('KeyS', 'ArrowDown') ? 1 : 0) - (any('KeyW', 'ArrowUp') ? 1 : 0),
+        };
+      },
+      sneak: () => any('ShiftLeft', 'ShiftRight'),
+      interact: () => any('KeyE', 'Space'),
+      takePresses() {
+        const out = presses;
+        presses = [];
+        return out;
+      },
+      takeClicks() {
+        const out = clicks;
+        clicks = [];
+        return out;
+      },
+    };
   };
-}
+})(window.HUSH = window.HUSH || {});

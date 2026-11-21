@@ -1,61 +1,83 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
+// Hushwork: every tuning number, colour and name in one place. The view is a fixed 1280x720
+// logical area (a 56 px HUD bar, the 32x16 tile room, a 24 px hint bar); the renderer scales it.
+(function (HW) {
+  'use strict';
 
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
+  HW.VIEW = { width: 1280, height: 720 };
+  HW.TILE = 40;
+  HW.COLS = 32;
+  HW.ROWS = 16;
+  HW.MAP_Y = 56;
+  HW.STEP = 1 / 60;
 
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
-export const STEP = 1 / 60;
+  HW.PLAYER = {
+    radius: 11,
+    walk: 152,
+    sneak: 90,
+    carryScale: 0.92,
+    coins: 3,
+    throwRange: 290,
+    coinFlight: 0.55,
+    stepEvery: 0.3,
+    reach: 48,
+  };
 
-export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
-};
+  HW.GUARD = {
+    radius: 12,
+    patrol: 62,
+    investigate: 92,
+    chase: 134,
+    lockdownChase: 146,
+    range: 240,
+    halfAngle: 0.56,
+    turn: 4.2,
+    seeRate: 1.25,
+    forget: 0.16,
+    suspicious: 0.32,
+    searchTime: 3.2,
+    loseSight: 3.5,
+    repath: 0.35,
+  };
 
-export const LIVES = 3;
+  HW.CAMERA = { range: 280, halfAngle: 0.34, alarmRate: 30, radioEvery: 1.6 };
 
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
-};
+  HW.ALARM = {
+    max: 100,
+    decay: 3.2,
+    decayDelay: 2.2,
+    guardSpot: 20,
+    guardSeeRate: 16,
+    laser: 34,
+    lootLift: 8,
+    lockdownSeconds: 24,
+    radioEvery: 2.4,
+  };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
-};
+  HW.NOISE = { step: 96, carpetScale: 0.45, wallScale: 0.6, coin: 215, loot: 170 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
+  HW.TERMINAL = { hackTime: 1.3, loopTime: 14, cooldown: 18 };
 
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+  HW.SCORE = { loot: 1000, gem: 200, perSecond: 15, alarmPenalty: 5, ghost: 600, ranks: [['S', 2300], ['A', 1800], ['B', 1300], ['C', 0]] };
 
-export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
-};
+  HW.FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+  HW.MONO = 'ui-monospace, "Cascadia Mono", Consolas, monospace';
+  HW.BEST_KEY = 'hushwork.best.v1';
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+  HW.PALETTE = {
+    backdrop: '#06080e',
+    hud: '#0c1019',
+    hudLine: '#232a3a',
+    text: '#e9edf5',
+    muted: '#8790a4',
+    accent: '#5fe0c8',
+    gold: '#f4c95d',
+    danger: '#ff4d5e',
+    warn: '#ffb347',
+    thief: '#5fe0c8',
+    guard: '#3c5a99',
+    guardCone: 'rgba(255, 236, 170, 0.20)',
+    camCone: 'rgba(170, 220, 255, 0.16)',
+    alertCone: 'rgba(255, 70, 90, 0.28)',
+    laser: '#ff3b6b',
+  };
+})(window.HUSH = window.HUSH || {});
