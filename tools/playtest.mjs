@@ -5,18 +5,23 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { launch } from './cdp.mjs';
 
-const URL_ = process.env.URL ?? 'http://localhost:8080/';
+const URL_ = process.env.URL ?? 'http://localhost:8080/?seed=1';
 const out = '/tmp/hush-play';
 mkdirSync(out, { recursive: true });
 const b = await launch();
 const requests = [];
 const errors = [];
+const inputMs = Number(process.env.INPUT_MS ?? 45);
+let failures = 0;
 b.on((m) => {
   if (m.method === 'Network.requestWillBeSent') requests.push(m.params.request.url);
   if (m.method === 'Runtime.exceptionThrown') errors.push(m.params.exceptionDetails.exception?.description);
+  if (m.method === 'Runtime.consoleAPICalled' && m.params.type === 'error') errors.push(m.params.args.map((a) => a.value ?? a.description).join(' '));
+  if (m.method === 'Log.entryAdded' && m.params.entry.level === 'error') errors.push(m.params.entry.text);
 });
 await b.send('Network.enable');
 await b.send('Runtime.enable');
+await b.send('Log.enable');
 await b.send('Page.navigate', { url: URL_ });
 await sleep(800);
 
@@ -43,7 +48,7 @@ async function click(x, y) {
   await b.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
 const st = () => b.evaluate(`(() => { const s = __hushwork.state(); const p = s.player; return {
-  screen: __hushwork.screen(), x: Math.round(p.x), y: Math.round(p.y), alarm: +s.alarm.toFixed(1), prize: s.prizeTaken, gems: s.gemsTaken,
+  screen: __hushwork.screen(), night: s.level.index + 1, time: +s.time.toFixed(2), alarmPeak: +s.alarmPeak.toFixed(1), x: Math.round(p.x), y: Math.round(p.y), alarm: +s.alarm.toFixed(1), prize: s.prizeTaken, gems: s.gemsTaken,
   coins: p.coins, lockdown: s.lockdown, hacked: +s.loopLeft.toFixed(1), hack: +p.hack.toFixed(2), rings: s.rings.length,
   guards: s.guards.map((g) => ({ x: Math.round(g.x), y: Math.round(g.y), mode: g.mode, sus: +g.sus.toFixed(2), sees: g.sees })),
   cams: s.cameras.map((c) => ({ sees: !!c.sees, sus: +(c.sus || 0).toFixed(2) })) }; })()`);
@@ -102,7 +107,7 @@ async function goTo(col, row, { sneak = true, careful = true, timeout = 60000, u
     if (ty - s.y > 4) keys.push('KeyS');
     if (s.y - ty > 4) keys.push('KeyW');
     await setHeld(keys);
-    await sleep(45);
+    await sleep(inputMs);
   }
   await setHeld([]);
   const s = await st();
@@ -113,7 +118,7 @@ async function goTo(col, row, { sneak = true, careful = true, timeout = 60000, u
 // A look-ahead planner that runs in the page: it copies the live state into a scratch world and
 // tries a few seconds of each option (follow the route, step one of 8 ways, hold still), then
 // says which keys to hold. The real game only ever receives the keys.
-await b.evaluate(`window.__plan = function (gx, gy, horizon) {
+const planner = `window.__plan = function (gx, gy, horizon) {
   const H = window.HUSH, live = __hushwork.state();
   const dirs = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
   const options = [];
@@ -155,7 +160,8 @@ await b.evaluate(`window.__plan = function (gx, gy, horizon) {
     if (!best || score < best.score) best = { score, kind: o.dir ? 'dir' : 'route', ox: o.dir ? o.dir[0] : 0, oy: o.dir ? o.dir[1] : 0, wait: o.wait, sneak: o.sneak, first, bad };
   }
   return best;
-};`);
+};`;
+await b.evaluate(planner);
 async function sneakTo(col, row, { timeout = 90000, until = null, horizon = 4.5 } = {}) {
   const gx = (col + 0.5) * 40;
   const gy = (row + 0.5) * 40;
@@ -213,7 +219,7 @@ if (run('walk')) {
   log('P again ->', (await st()).screen);
 }
 
-if (run('heist')) {
+if (run('heist') || run('night1')) {
   await freshNight1();
   log('restart ->', (await st()).screen);
   const term = await b.evaluate(`(() => { const t = __hushwork.state().level.terminal; return [Math.floor(t.x / 40), Math.floor(t.y / 40)]; })()`);
@@ -237,6 +243,10 @@ if (run('heist')) {
   await sleep(300);
   s = await st();
   log('end of heist:', s.screen, 'alarm', s.alarm, 'prize', s.prize, 'gems', s.gems, await snap('heist-end'));
+  s.blocked = s.screen === 'won' ? null : 'route incomplete';
+  s.frame = `${out}/${await snap(`night1-${s.screen}`)}`;
+  log('FINAL', JSON.stringify(s));
+  if (s.screen !== 'won') failures += 1;
 }
 
 if (run('alarm')) {
@@ -282,6 +292,56 @@ if (run('lockdown')) {
   log('after waiting:', s.screen, await snap('lockdown-end'));
 }
 
-const remote = requests.filter((u) => !u.startsWith('http://localhost:8080') && !u.startsWith('data:'));
+for (const night of [2, 3]) {
+  if (!run(`night${night}`)) continue;
+  await b.send('Page.navigate', { url: URL_ });
+  await sleep(800);
+  await b.evaluate(planner);
+  await tap(`Digit${night}`);
+  await sleep(Number(process.env.START_DELAY_MS ?? 300));
+  const routes = {
+    1: [[5, 14], [21, 14], [27, 14], [27, 7], [29, 7], [27, 14], [1, 14]],
+    2: [[3, 10], [3, 7], [8, 5], [15, 5], [13, 2], [16, 5], [28, 5], [27, 3], [30, 1]],
+    3: [[27, 11], [22, 7], [15, 7], [10, 7], [9, 5], [6, 5], [6, 1], [1, 1]],
+  };
+  for (const [col, row] of routes[night]) {
+    const before = await st();
+    const s = await goTo(col, row, { sneak: !(night === 2 && before.prize), careful: night === 2 && !before.prize, timeout: 30000, until: night === 2 && row === 2 ? (q) => q.prize : null });
+    log('waypoint', night, col, row, JSON.stringify(s));
+    if (s.screen !== 'play') break;
+    if ((night === 2 && col === 3 && row === 7) || (night === 3 && col === 27 && row === 11)) {
+      await setHeld(['KeyE']); await sleep(1600); await setHeld([]);
+    }
+    if (night === 2 && col === 15 && row === 5) {
+      await click(19.5 * 40, 56 + 2.5 * 40); await sleep(1500);
+    }
+    if (night === 3 && col === 9 && row === 5) {
+      await click(4.5 * 40, 56 + 9.5 * 40); await sleep(2000);
+    }
+  }
+  await setHeld([]);
+  const s = await st();
+  s.blocked = s.screen === 'won' ? null : s.screen === 'play' ? 'route incomplete' : 'caught or lockdown';
+  s.frame = `${out}/${await snap(`night${night}-${s.screen}`)}`;
+  log('FINAL', JSON.stringify(s));
+  if (s.screen !== 'won') failures += 1;
+}
+
+if (run('smoke')) {
+  for (const night of [1, 2, 3]) {
+    await b.send('Page.navigate', { url: URL_ });
+    await sleep(800);
+    await tap(`Digit${night}`);
+    await sleep(500);
+    const s = await st();
+    log('LOAD', JSON.stringify({ night, screen: s.screen, frame: `${out}/${await snap(`load-night${night}`)}` }));
+    if (s.screen !== 'play' || s.night !== night) failures += 1;
+  }
+}
+
+const origin = new URL(URL_).origin;
+const remote = requests.filter((u) => !u.startsWith('file:') && !u.startsWith('data:') && new URL(u).origin !== origin);
 log('errors:', errors.length ? errors : 'none', '| non-local requests:', remote.length ? remote : 'none');
+log(JSON.stringify({ url: URL_, consoleErrors: errors.length, nonLocalRequests: remote.length, failures }));
 b.close();
+if (failures || errors.length || remote.length) process.exitCode = 1;
